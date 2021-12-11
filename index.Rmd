@@ -1,20 +1,20 @@
 ---
 title: 'Project 2: Data Mining, Classification, Prediction'
-author: "SDS322E"
-date: ''
-output:
+author: "Raquel Mejia  |  rm57578"
+date: "SDS322E"
+output: 
   html_document:
     toc: yes
     toc_float:
       collapsed: no
       smooth_scroll: yes
-  pdf_document:
-    toc: no
+    theme: cosmo
+    highlight: kate
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, eval = TRUE, fig.align = "center", warning = F, message = F,
-tidy=TRUE, tidy.opts=list(width.cutoff=60), R.options=list(max.print=100))
+tidy=FALSE, tidy.opts=list(width.cutoff=60), R.options=list(max.print=100))
 
 class_diag <- function(score, truth, positive, cutoff=.5){
 
@@ -43,96 +43,282 @@ class_diag <- function(score, truth, positive, cutoff=.5){
   round(data.frame(acc,sens,spec,ppv,f1,ba=(sens+spec)/2,auc, row.names = "Metrics"),4)
 }
 ```
+<br>
 
-# Mining, Classification, Prediction
-
-## Name and EID here
-
-### Introduction 
-
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
-
-```{R}
+Introduction
+=============
+<br>
+The purpose of this project was to explore unsupervised and supervised machine learning techniques by using cluster analysis, principal component analysis, classification and cross-validation, and regression prediction models.   
+<br>
+The purpose of this analysis is to classify a variety of lineages by comparing codon bias. The frequency by which each species uses a codon is described as the total number of occurrences of the codon in that species' genome divided by the total number of codons in the species' genome. This data was calculated, curated, and made publicly available by Dr. Bohdan B. Khomtchouk from the University of Chicago in his article [Codon Usage Bias Levels Predict Taxonomic Identity and Genetic Composition](https://doi.org/10.1101/2020.10.26.356295). 
+<br>
+```{r}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
-
-# if your dataset needs tidying, do so here
-
-# any other code here
-```
-
-### Cluster Analysis
-
-```{R}
+library(kableExtra)
 library(cluster)
-# clustering code here
-```
-
-Discussion of clustering here
-    
-    
-### Dimensionality Reduction with PCA
-
-```{R}
-# PCA code here
-```
-
-Discussions of PCA here. 
-
-###  Linear Classifier
-
-```{R}
-# linear classifier code here
-```
-
-```{R}
-# cross-validation of linear classifier here
-```
-
-Discussion here
-
-### Non-Parametric Classifier
-
-```{R}
+library(GGally)
 library(caret)
-# non-parametric classifier code here
+codon_usage <- read_csv("/stor/home/rm57578/project2/dataset/codon_usage.csv")
+codon_usage %>% filter(DNAtype == c("0", "1", "2")) -> codon_usage
+codon_usage %>% mutate(UUU = as.numeric(UUU)) -> codon_usage
 ```
+<br>
+The variables analyzed in this dataset are as follows: 
 
+* `SpeciesName` describes the lineage being examined
+* `Kingdom` classifies a lineage as belonging to one of the following groups: viral, phage, archaea, plasmids, eubacteria, plants, invertebrates, vertebrates, mammals, rodents, or primates. 
+* `DNAtype` classifies eukaryotic DNA as nuclear (0), mitochondrial (1), or chloroplast DNA (2).
+* `Ncodons` describes the total number of codons in the organism's genome
+* The rest of the variables correspond to the usage frequency of each of the 64 possible codons (i.e. `UUU`, `UUC`, etc). 
+<br>
+<br>
+There are 4,328 lineages examined in this dataset. The table below describes the number of lineages in each group. 
+```{R, collapse=T}
+
+nrow(codon_usage)
+
+codon_usage %>% group_by(Kingdom) %>% summarise(n()) %>% 
+  kable(caption = "Number of Lineages in each Group") %>% 
+  kable_material(c("striped","hover")) %>%
+  scroll_box(height = "250px")
+``` 
+<br>
+The table below describes the number of lineages in each DNA type.
+```{R, collapse=T}
+codon_usage %>% group_by(DNAtype) %>% summarise(n()) %>% 
+  kable(caption = "Number of Lineages in each DNA Type") %>%
+  kable_material(c("striped","hover"))
+``` 
+<br>
+<br>
+
+Cluster Analysis  
+=================  
+Partioning around Medoids (PAM) was utilized to generate clusters based on codon bias for all 64 codons. Scaling was not necessary in this case because all variables have data in the form of frequency. A loop was used to compare average silhouette width for 2 through 10 clusters. The highest silhouette width was achieved at three clusters, so k=3 was used as the cluster number in PAM. 
+```{R, collapse = T}
+pam_dat <- codon_usage %>% select(-5)
+sil_width<-vector()
+
+for(i in 2:10){
+  pam_fit <- pam(pam_dat, k = i)
+  sil_width[i] <- pam_fit$silinfo$avg.width
+}
+
+ggplot() + geom_line(aes(x=1:10, y=sil_width)) + 
+  scale_x_continuous(name="k", breaks=1:10) +
+  ggtitle("Average Silhouette Width for PAM") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+<br>
+The average silhouette width is 0.62, which indicates that a reasonable cluster structure was identified. 
+```{r, collapse = T}
+pamcodon <- codon_usage %>% pam(k=3)
+pamcodon$silinfo$avg.width
+```
+<br>
+Pairwise combinations of codons that begin with two uracils are depicted below. All pairwise combinations are not plotted because a 64x64 matrix could not be interpreted clearly due to size constraints. 
+<br>
+The three clusters appear to have similar proportions of lineages that use UUU and UUC at similar frequencies. The cluster depicted in blue appears to use UUA at a slightly higher frequencies, and the cluster depicted in green appears to have a much higher proportion of lineages that utilize UUG. 
+```{r, fig.height = 6, fig.width = 6}
+pamclust <- codon_usage %>% select(6:9) %>% mutate(cluster=as.factor(pamcodon$clustering))
+ggpairs(pamclust, columns=1:4, aes(color=cluster, alpha=0.3))
+```
+<br>
+The table below summarizes the average codon usage by cluster assignment. In general, clusters 1 and 3 appear to have more similar codon biases compared to cluster 2. 
+```{r}
+codon_usage %>% 
+  mutate(cluster=as.factor(pamcodon$clustering)) %>%
+  group_by(cluster)%>%
+  summarize_if(is.numeric,mean,na.rm=T) %>%
+  select(c(-2, -3, -4)) %>%
+  kable(caption = "Average Codon Usage by Cluster (frequency)") %>% 
+  kable_material(c("striped","hover")) %>%
+  scroll_box(height = "250px")
+
+```
+<br>
+<br>
+
+Dimensionality Reduction with PCA
+==================================
+<br>
+Principle Component Analysis was applied to a scaled version of codon bias frequencies for all 64 codons. 
+```{r}
+codon_usage %>% select(c(-1, -2, -3, -4, -5)) %>% scale() -> codonpca
+codon_usage$SpeciesName -> rownames(codonpca)
+codonpca %>% as.data.frame() -> codonpca
+princomp(~., data = codonpca, cor=T) -> codonpca
+```
+<br>
+Kaiser's Rule was followed to determine the number of relevant PCs. The first ten PCs had eigenvalues greater than 1, so they were taken into consideration for further analysis. 
+```{r}
+eigval <- codonpca$sdev^2 
+
+eigval %>% as.data.frame() %>% 
+  kable(caption = "Principal Components and their Eigenvalues") %>% 
+  kable_material(c("striped","hover")) %>%
+  scroll_box(height = "250px")
+```
+<br>
+The first ten PCs explain approximately 73% of the variance in codon bias.
+```{r}
+summary(codonpca)
+```
+<br>
+The Scree Plot below depicts the proportion of variance explained by each principal component. The first principal component is responsible for around 30% of the codon bias variance, and the second PC is responsible for around 19% of the codon variance bias.
+```{r, collapse = T}
+varprop = round(eigval/sum(eigval), 2) 
+
+ggplot() + geom_bar(aes(y=varprop, x=1:64), stat="identity") + 
+  geom_path(aes(y=varprop, x=1:64)) + 
+  geom_text(aes(x=1:64, y=varprop, label=round(varprop, 2)), vjust=1, col="white", size=4) + 
+  scale_y_continuous(breaks=seq(0, 1, .1), labels = scales::percent, name = "Proportion of Variance from PC") + 
+  xlim(0, 11) + xlab("Principal Component")+
+  ggtitle("Scree Plot") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+<br>
+Lineages that have a high score on PC1 tend to use codons GGC, CUG, or GUC at very low frequencies, but tend to use codons UUA, AUU, UAU, or AAU at very high frequencies. 
+<br>
+Lineages that have a high score on PC2 tend to use codons like CUA and UGA at very low frequencies, but tend to use codons AUG (start) and GAU at very high frequencies.
+```{r}
+codonpca$loadings %>% as.data.frame.matrix() -> codonpcaloadings
+
+codonpcaloadings %>% round(3) %>% arrange(Comp.1) %>%
+  kable(caption = "Correlation of Principal Components to Codon Biases") %>% 
+  kable_material(c("striped","hover")) %>%
+  scroll_box(height = "250px")
+```
+<br>
+
+Linear Classifier
+=================
+
+The `DNAtype` variable was filtered to only include nuclear or mitochondrial DNA. Logistic regression was used as a model to predict DNA type based on a lineage's codon biases. 
+<br>
+Codon biases appear to perfectly predict whether a genome in this dataset is nuclear (0) or mitochondrial (1), supported by an AUC value of 1 and a corresponding accuracy of 1. 
 ```{R}
-# cross-validation of np classifier here
+codon_usage %>% filter(DNAtype == c(0,1)) %>% select(-1, -3, -4, -5) %>% na.omit() -> codonlogistic
+
+glm(DNAtype ~., data = codonlogistic, family = binomial) -> logistic_fit
+
+predict(logistic_fit, type="response") -> prob_reg
+
+prob_reg %>% round(3)
+
+class_diag(prob_reg, truth = codonlogistic$DNAtype, positive = 1) %>%
+  kable(caption = "Performance Metrics for Training Dataset") %>% 
+  kable_material(c("striped","hover")) 
 ```
-
-Discussion
-
-
-### Regression/Numeric Prediction
-
+<br>
+The confusion matrix below supports that codon biases are an excellent predictor using a logistic model of whether a genome is nuclear or mitochondrial.
+```{r}
+table("Actual DNA Type"= codonlogistic$DNAtype, "Predicted DNA Type" = round(prob_reg, 3)) %>% addmargins() 
+```
+<br>
+Ten-fold cross validation was used on the same logistic regression model to compare out-of-sample prediction performance to the performance from the training dataset. 
+<br>
+On average, 10-fold CV on a logistic model has an accuracy of 99% and an AUC of 99%. 
 ```{R}
-# regression model code here
+set.seed(1)
+cv <- trainControl(method="cv", number = 10, classProbs = T, savePredictions = T)
+fit <- train(DNAtype ~., data = codonlogistic, trControl=cv, method="glm")
+class_diag(fit$pred$pred, fit$pred$obs, positive=1) %>%
+  kable(caption = "Performance Metrics for Testing Dataset") %>% 
+  kable_material(c("striped","hover")) 
 ```
+It appears that the logistic model is not over-fitted, as both the training and test datasets produced AUC values of almost 100%, and the rest of the performance metrics are above 96% in both cases. 
+<br>
+<br>
 
+Non-Parametric Classifier
+=========================
+
+A non-parametric k-nearest-neighbors model was used to predict DNA type (nuclear vs. mitochondrial) based on a lineage's codon biases, like above. 
+<br>
+The kNN model below supports that codon biases appear to be good predictors of whether a genome in this dataset is nuclear or mitochondrial, supported by an AUC value of 0.99 and a corresponding accuracy of 0.99. 
+```{r}
+knn_fit <- knn3(factor(DNAtype==0, levels=c("TRUE","FALSE")) ~ .,  data=codonlogistic, k=5)
+
+predictknn <- predict(knn_fit, newdata=codonlogistic)
+
+class_diag(predictknn[,2], codonlogistic$DNAtype, positive=1) %>%
+  kable(caption = "Performance Metrics for Training Dataset") %>% 
+  kable_material(c("striped","hover")) 
+```
+<br>
+The confusion matrix below supports that codon biases are an excellent predictor using kNN to predict whether a genome is nuclear or mitochondrial. Positives refer to classification as mitochondrial DNA. 
+```{r}
+table("Actual DNA type" = factor(codonlogistic$DNAtype==1, levels=c("TRUE","FALSE")),
+      "Predicted DNA type" = factor(predictknn[,2] > .5, levels=c("TRUE","FALSE")))
+```
+<br>
+Ten-fold cross validation was used on the same kNN model to compare out-of-sample prediction performance to the performance from the training dataset. 
+<br>
+On average, 10-fold CV on a kNN model has an accuracy of 99% and an AUC of 99%, just like the 10-fold CV averages from the logistic model. The kNN does not appear to over-fit the data, as all of the performance metrics for both the training and testing datasets are above 98%. Both logistic and kNN models seem to be excellent predictors of DNA type, although kNN seems to have a slightly higher sensitivity than the logistic model. 
 ```{R}
-# cross-validation of regression model here
+set.seed(1)
+cv <- trainControl(method="cv", number = 10, classProbs = T, savePredictions = T)
+fit <- train(DNAtype ~ ., data=codonlogistic, trControl=cv, method="knn")
+
+class_diag(fit$pred$pred, fit$pred$obs, positive=1) %>%
+  kable(caption = "Performance Metrics for Testing Dataset") %>% 
+  kable_material(c("striped","hover")) 
 ```
+<br>
 
-Discussion
+Numeric Prediction using Regression
+===================================
 
-### Python 
+A linear regression model was used to predict how frequently a start codon (`AUG`) is utilized. The variables used to predict AUG frequency are Linnean classification (`Kingdom` classifies a lineage as belonging to one of the following groups: viral, phage, archaea, plasmids, eubacteria, plants, invertebrates, vertebrates, mammals, rodents, or primates) and the total number of codons in the lineage's genome. 
+<br>
+The Mean Square Error (MSE) in the training dataset is approximately 0.21. 
+```{R, collapse = T}
+codon_usage %>% select(1, 4, AUG) -> codonlm
+lm(AUG~.,data=codonlm) -> AUGfit
+predict(fit) -> AUGpredict
 
-```{R}
-library(reticulate)
+mean((codonlm$AUG-AUGpredict)^2)
 ```
+<br>
+Ten-fold cross validation was used on this linear regression model to compare out-of-sample prediction performance to the performance from the training dataset. 
+<br>
+The average MSE for the 10-fold CV is less than 0.0001, indicating that the frequency at which a lineage utilizes the start codon AUG can be reliably predicted by knowing the size of the lineage's genome along with the Linnean classification group that it belongs to. The linear is not over-fitted because CV reveals a lower MSE than the MSE that resulted from predictions using the training dataset. 
+```{R, collapse = T}
+set.seed(1)
+cv <- trainControl(method="cv", number = 10, classProbs = T, savePredictions = T)
+fit <- train(AUG~., data=codonlm, trControl=cv, method="lm")
 
-```{python}
-# python code here
+mean((fit$results$RMSE)^2)
 ```
+<br>
 
-Discussion
+Classification Trees
+=====================
+A decision tree was utilized to predict whether a lineage is eubacteria, mammalian, or a plant by using codon biases as predictor variables. The codons GCG, UGA (stop), and UUC appear to have the most significant impact on classification. The most successful predictions are for mammals, with 92% of mammals being predicted correctly, but the remaining two kingdoms are predicted with less accurately based on codon biases. 
+```{r}
+codon_usage %>% 
+  select(-2,-3,-4,-5) %>% 
+  filter(Kingdom %in% c("bct","mam","pln")) %>%
+  na.omit -> codonkingdom
+library(rpart.plot)
 
-### Concluding Remarks
+fit <- train(Kingdom ~ ., data=codonkingdom, method="rpart")
+rpart.plot(fit$finalModel,digits=2)
+```
+<br>
 
-Include concluding remarks here, if any
+Concluding Remarks
+===================
+It appears that the diversity of life can be classified and predicted extremely accurately by examining patterns of codon biases across different lineages. Codon bias as a predictor variable of Linnean classification seems to work well for large groupings like kingdoms, but it would be of interest to examine if this can be used to distinguish smaller groupings, possibly even species. Additionally, it would be interesting to ask why the codons GCG, UGA, and UUC are most significant when predicting kingdom classification. 
 
 
 
-
+```{R, echo=F}
+sessionInfo()
+Sys.time()
+Sys.info()
+```
